@@ -1,0 +1,29 @@
+{
+  "name": "@modelforge/worker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Long-running training worker. Claims queued jobs from Postgres, trains with @modelforge/ml, streams metrics, uploads artifacts.",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
+    "test": "echo \"no tests in worker yet\""
+  },
+  "dependencies": {
+    "@modelforge/ml": "workspace:*",
+    "@supabase/supabase-js": "^2.112.3",
+    "dotenv": "^17.2.3",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9",
+    "@types/node": "^20",
+    "eslint": "^9",
+    "tsx": "^4.20.5",
+    "typescript": "^5",
+    "typescript-eslint": "^8"
+  }
+}

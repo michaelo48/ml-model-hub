@@ -1,0 +1,5 @@
+export type { FeatureStats, LinearModel, Matrix, Vector } from './types'
+export { computeStats, applyStats } from './normalize'
+export { solve, gram, gramVec } from './linalg'
+export { fitOls, predictLinear, type OlsOptions } from './linear/ols'
+export { mse, rmse, r2 } from './metrics'

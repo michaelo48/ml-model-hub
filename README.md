@@ -1,36 +1,73 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ModelForge
 
-## Getting Started
+A mini model-serving platform. Upload a tabular CSV, train a classical ML model as a background job with a live loss curve, then call the trained model over a REST inference endpoint with an API key.
 
-First, run the development server:
+The training math (OLS, gradient descent, SGD, Adam) is implemented from scratch in TypeScript in [`packages/ml`](packages/ml). The point of the project is the systems around it: job queue, background worker, artifact storage, model versioning, API-key auth, RLS, deployment.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## Architecture
+
+```mermaid
+flowchart LR
+  B[Browser] -->|session cookie| W[Next.js on Vercel]
+  W -->|publishable key + RLS| S[(Supabase: Postgres, Auth, Storage, Realtime)]
+  K[Training worker on Fly.io] -->|secret key| S
+  C[External client] -->|Bearer api_key| W
+  W -.->|imports| M[packages/ml]
+  K -.->|imports| M
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Repository layout
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```
+apps/web        Next.js app: UI, server actions, inference API
+apps/worker     long-running Node worker: claims jobs, trains, streams metrics
+packages/ml     pure TypeScript training/inference math, unit tested, no I/O
+supabase/       migrations, config
+docs/           RLS testing notes, etc.
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Local setup
 
-## Learn More
+Prereqs: Node 20+, pnpm 10 (`npm i -g pnpm`), Supabase CLI.
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+pnpm install
+cp apps/web/.env.example apps/web/.env.local      # fill in values
+cp apps/worker/.env.example apps/worker/.env       # fill in values
+supabase link --project-ref YOUR_REF
+pnpm db:push                                       # apply migrations
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+pnpm dev          # web on http://localhost:3000
+pnpm dev:worker   # worker, in a second terminal
+pnpm test         # packages/ml unit tests
+pnpm typecheck && pnpm lint
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Environment variables
 
-## Deploy on Vercel
+| App | Variable | Notes |
+| --- | --- | --- |
+| web | `NEXT_PUBLIC_SUPABASE_URL` | Project URL |
+| web | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | `sb_publishable_...`, safe for the browser |
+| web | `SUPABASE_SECRET_KEY` | `sb_secret_...`, server-only (inference route) |
+| worker | `SUPABASE_URL` | Project URL |
+| worker | `SUPABASE_SECRET_KEY` | `sb_secret_...`, bypasses RLS |
+| worker | `WORKER_ID`, `POLL_INTERVAL_MS`, `HEARTBEAT_INTERVAL_MS` | optional |
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Status
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Phase 1 in progress. See [CLAUDE.md](CLAUDE.md) for the full spec and phase plan.
+
+- [x] Auth (email/password + GitHub), profiles
+- [x] Monorepo, `packages/ml` with tested OLS, worker skeleton
+- [ ] Phase 1 schema + RLS + storage policies
+- [ ] Dataset upload
+- [ ] Model builder
+- [ ] Worker training loop + Realtime metrics
+- [ ] Training page with live loss curve
+- [ ] Inference endpoint + API keys
+- [ ] Deployed (Vercel + Fly.io)
+
+## Deployment
+
+Web: Vercel, root directory `apps/web`. Worker: `docker build -f apps/worker/Dockerfile .` from the repo root, deploy to Fly.io/Railway. Live URL and curl example will go here once deployed.
