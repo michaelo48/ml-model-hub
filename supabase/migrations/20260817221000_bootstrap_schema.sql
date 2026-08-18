@@ -63,21 +63,39 @@ alter table public.training_jobs enable row level security;
 alter table public.job_events enable row level security;
 alter table public.models enable row level security;
 
+-- Policies are dropped-then-created so this migration is safe to re-run.
+drop policy if exists "own datasets" on public.datasets;
 create policy "own datasets" on public.datasets
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
+drop policy if exists "own jobs" on public.training_jobs;
 create policy "own jobs" on public.training_jobs
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
+drop policy if exists "own job events" on public.job_events;
 create policy "own job events" on public.job_events
   for select using (
     exists (select 1 from public.training_jobs j
             where j.id = job_id and j.user_id = auth.uid())
   );
 
+drop policy if exists "own models" on public.models;
 create policy "own models" on public.models
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
--- Realtime
-alter publication supabase_realtime add table public.training_jobs;
-alter publication supabase_realtime add table public.job_events;
+-- Realtime (guarded so the migration is re-runnable)
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'training_jobs'
+  ) then
+    alter publication supabase_realtime add table public.training_jobs;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'job_events'
+  ) then
+    alter publication supabase_realtime add table public.job_events;
+  end if;
+end $$;
