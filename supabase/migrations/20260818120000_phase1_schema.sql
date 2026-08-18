@@ -18,7 +18,25 @@
 
 -- ---------------------------------------------------------------------------
 -- 0. Drop the prototype schema
+--    Guard: refuse to run if any prototype table has data. This migration was
+--    written against an empty project; another environment might not be.
+--    To proceed anyway, export/delete the rows first.
 -- ---------------------------------------------------------------------------
+do $$
+declare
+  t text;
+  n bigint;
+begin
+  foreach t in array array['datasets', 'training_jobs', 'job_events', 'models'] loop
+    if to_regclass('public.' || t) is not null then
+      execute format('select count(*) from public.%I', t) into n;
+      if n > 0 then
+        raise exception 'refusing to drop public.% (% rows). Empty it first.', t, n;
+      end if;
+    end if;
+  end loop;
+end $$;
+
 drop table if exists public.job_events cascade;
 drop table if exists public.models cascade;
 drop table if exists public.training_jobs cascade;

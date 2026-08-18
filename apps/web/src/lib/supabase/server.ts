@@ -8,6 +8,7 @@ import type { Database } from './database.types'
  * as it does in the browser.
  */
 export const createClient = async () => {
+  // cookies() is async in Next 15+ (sync access is deprecated), so the await is required.
   const cookieStore = await cookies()
 
   return createServerClient<Database>(

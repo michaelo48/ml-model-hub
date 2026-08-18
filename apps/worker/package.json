@@ -10,7 +10,8 @@
     "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src",
-    "test": "echo \"no tests in worker yet\""
+    "test": "vitest run",
+    "test:rls": "vitest run test/rls.integration.test.ts"
   },
   "dependencies": {
     "@modelforge/ml": "workspace:*",
@@ -24,6 +25,7 @@
     "eslint": "^9",
     "tsx": "^4.20.5",
     "typescript": "^5",
-    "typescript-eslint": "^8"
+    "typescript-eslint": "^8",
+    "vitest": "^3.2.7"
   }
 }

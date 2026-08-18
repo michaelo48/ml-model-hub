@@ -14,7 +14,8 @@
     "test": "pnpm -r test",
     "db:push": "supabase db push --linked",
     "db:migration": "supabase migration new",
-    "db:types": "supabase gen types typescript --linked --schema public > apps/web/src/lib/supabase/database.types.ts"
+    "db:types": "supabase gen types typescript --linked --schema public > apps/web/src/lib/supabase/database.types.ts",
+    "test:rls": "pnpm --filter @modelforge/worker test:rls"
   },
   "devDependencies": {
     "typescript": "^5"

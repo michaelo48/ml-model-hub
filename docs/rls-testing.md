@@ -38,6 +38,14 @@ Storage:
 Worker-only functions: `claim_training_job(text)`, `reap_stale_jobs(interval, int)`.
 `EXECUTE` is revoked from `anon` and `authenticated`.
 
+## Automated test
+
+`pnpm test:rls` runs [apps/worker/test/rls.integration.test.ts](../apps/worker/test/rls.integration.test.ts)
+against the linked project. It needs `SUPABASE_URL`, `SUPABASE_SECRET_KEY` and
+`SUPABASE_PUBLISHABLE_KEY` in `apps/worker/.env` and skips itself otherwise.
+It creates two throwaway users, runs every check below, and deletes them.
+Run it after any migration that touches policies or the worker functions.
+
 ## Manual test procedure
 
 You need two users, A and B, and the secret key. The quickest way is a Node
@@ -68,8 +76,6 @@ script using `@supabase/supabase-js`:
 
 ## Last run
 
-2026-08-18, against the linked project after migrations
-`20260818120000_phase1_schema.sql` and `20260818123000_storage_policy_cleanup.sql`.
-27 checks, 27 passed. The cleanup migration exists because the first run
-found dashboard-template storage policies that let users write to the
-`models` bucket.
+2026-08-18, `pnpm test:rls` against the linked project after
+`20260818130000_review_fixes.sql`: 13 tests, 13 passed. Includes the check that a
+user cannot move a storage object into another user's folder (UPDATE `WITH CHECK`).

@@ -1,3 +1,5 @@
+-- NOTE: superseded by 20260818130000_review_fixes.sql, which drops all non-migration
+-- storage policies dynamically. Kept because it has already been applied.
 -- Remove storage policies that were created from the dashboard template before
 -- the migrations took over. They duplicated the 'datasets' rules and, more
 -- importantly, let users write to the 'models' bucket, which must be
