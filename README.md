@@ -60,7 +60,7 @@ Phase 1 in progress. See [CLAUDE.md](CLAUDE.md) for the full spec and phase plan
 
 - [x] Auth (email/password + GitHub), profiles
 - [x] Monorepo, `packages/ml` with tested OLS, worker skeleton
-- [ ] Phase 1 schema + RLS + storage policies
+- [x] Phase 1 schema + RLS + storage policies ([docs/rls-testing.md](docs/rls-testing.md))
 - [ ] Dataset upload
 - [ ] Model builder
 - [ ] Worker training loop + Realtime metrics

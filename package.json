@@ -13,7 +13,8 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "db:push": "supabase db push --linked",
-    "db:migration": "supabase migration new"
+    "db:migration": "supabase migration new",
+    "db:types": "supabase gen types typescript --linked --schema public > apps/web/src/lib/supabase/database.types.ts"
   },
   "devDependencies": {
     "typescript": "^5"
