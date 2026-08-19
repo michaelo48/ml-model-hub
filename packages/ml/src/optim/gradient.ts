@@ -1,4 +1,5 @@
 import type { Hyperparameters, Optimizer } from '../config/model'
+import { DivergenceError } from '../errors'
 import { applyStats, computeStats } from '../normalize'
 import { createRng, shuffledIndices } from '../random'
 import type { LinearModel, Matrix, Vector } from '../types'
@@ -138,9 +139,7 @@ export function trainGradient(X: Matrix, y: Vector, link: Link, opts: GradientTr
 
     const loss = dataLoss(Xn, y, w, b, link)
     if (!Number.isFinite(loss)) {
-      throw new Error(
-        `trainGradient: loss diverged at epoch ${epoch} (learning rate ${lr} is too high for this data)`
-      )
+      throw new DivergenceError(epoch, lr)
     }
     if (opts.onEpoch?.({ epoch, loss }) === false) break
   }

@@ -16,3 +16,15 @@ export { fitModel, type FitOptions } from './train'
 export { createRng, shuffledIndices } from './random'
 export { mse, rmse, r2, logLoss, accuracy } from './metrics'
 export * from './config/model'
+export {
+  ARTIFACT_FORMAT,
+  artifactSchema,
+  artifactMetricsSchema,
+  buildArtifact,
+  parseArtifact,
+  predictWithArtifact,
+  type Artifact,
+  type ArtifactMetrics,
+  type BuildArtifactInput,
+} from './artifact'
+export { DivergenceError, SingularMatrixError } from './errors'

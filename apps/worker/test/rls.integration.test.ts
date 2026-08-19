@@ -56,6 +56,16 @@ describe.skipIf(!enabled)('RLS and job queue', () => {
   let datasetId: string
   let modelId: string
   let jobId: string
+  let jobId2: string
+  /**
+   * Test jobs are backdated *as admin* so they are the oldest queued rows in
+   * the project and claim_training_job hands them out first. Assertions are
+   * then about our rows, never about global queue counts, so leftovers from
+   * other users or runs cannot change the outcome. A user cannot do this
+   * themselves; that is asserted below.
+   */
+  const BACKDATED = '2000-01-01T00:00:00Z'
+  const BACKDATED_2 = '2000-01-01T00:00:01Z'
 
   beforeAll(async () => {
     ;[A, B] = await Promise.all([makeUser('a'), makeUser('b')])
@@ -63,15 +73,24 @@ describe.skipIf(!enabled)('RLS and job queue', () => {
 
   afterAll(async () => {
     if (!admin) return
+    // Loud cleanup: a leaked fixture user leaves claimed jobs and datasets in
+    // the shared project and poisons later runs, so any failure here fails
+    // the suite instead of being swallowed.
+    const problems: string[] = []
     for (const u of [A, B]) {
       if (!u) continue
+      const del = await admin.auth.admin.deleteUser(u.id)
+      if (del.error) problems.push(`deleteUser ${u.id}: ${del.error.message}`)
       const objs = await admin.storage.from('datasets').list(u.id)
       const names = (objs.data ?? []).map((o) => `${u.id}/${o.name}`)
-      if (names.length) await admin.storage.from('datasets').remove(names).catch(() => undefined)
-      await admin.from('rate_limit_events').delete().eq('user_id', u.id)
+      if (names.length) {
+        const rm = await admin.storage.from('datasets').remove(names)
+        if (rm.error) problems.push(`remove storage ${u.id}: ${rm.error.message}`)
+      }
+      const rl = await admin.from('rate_limit_events').delete().eq('user_id', u.id)
+      if (rl.error) problems.push(`rate_limit_events ${u.id}: ${rl.error.message}`)
     }
-    if (A) await admin.auth.admin.deleteUser(A.id)
-    if (B) await admin.auth.admin.deleteUser(B.id)
+    if (problems.length) throw new Error(`RLS test cleanup failed: ${problems.join('; ')}`)
   })
 
   // ---- datasets / models -------------------------------------------------
@@ -128,14 +147,60 @@ describe.skipIf(!enabled)('RLS and job queue', () => {
     const ok = await A.client.from('training_jobs').insert({ model_id: modelId }).select().single()
     expect(ok.error).toBeNull()
     jobId = ok.data!.id
+    const ok2 = await A.client.from('training_jobs').insert({ model_id: modelId }).select().single()
+    expect(ok2.error).toBeNull()
+    jobId2 = ok2.data!.id
+    // Admin (secret key, auth.uid() is null) may set created_at; the worker
+    // never does, this is purely to make the test's rows the oldest queued.
+    const bd1 = await admin!.from('training_jobs').update({ created_at: BACKDATED }).eq('id', jobId)
+    const bd2 = await admin!.from('training_jobs').update({ created_at: BACKDATED_2 }).eq('id', jobId2)
+    expect(bd1.error).toBeNull()
+    expect(bd2.error).toBeNull()
 
     const bad = await B.client.from('training_jobs').insert({ model_id: modelId })
     expect(bad.error).not.toBeNull()
   })
 
-  it('A cannot enqueue with a non-queued status', async () => {
-    const { error } = await A.client.from('training_jobs').insert({ model_id: modelId, status: 'running' })
-    expect(error).not.toBeNull()
+  it('A cannot jump the queue or pick an attempt count: server sets created_at and attempt', async () => {
+    const before = Date.now()
+    const { data, error } = await A.client
+      .from('training_jobs')
+      .insert({
+        model_id: modelId,
+        created_at: '1970-01-01T00:00:00Z',
+        attempt: 5,
+        claimed_at: '1970-01-01T00:00:00Z',
+        started_at: '1970-01-01T00:00:00Z',
+        heartbeat_at: '1970-01-01T00:00:00Z',
+        finished_at: '1970-01-01T00:00:00Z',
+        error_message: 'nope',
+      } as never)
+      .select()
+      .single()
+    // The insert is accepted, but the stored row is a clean, freshly
+    // timestamped, attempt-0 queued job: the sanitize trigger overrides
+    // client values for authenticated sessions. (status and claimed_by are
+    // rejected outright by the policy; see the next test.)
+    expect(error).toBeNull()
+    expect(data).toMatchObject({
+      status: 'queued',
+      attempt: 0,
+      claimed_by: null,
+      claimed_at: null,
+      started_at: null,
+      heartbeat_at: null,
+      finished_at: null,
+      error_message: null,
+    })
+    expect(new Date(data!.created_at).getTime()).toBeGreaterThanOrEqual(before - 5_000)
+    await admin!.from('training_jobs').delete().eq('id', data!.id)
+  })
+
+  it('A cannot enqueue with a non-queued status or a claimed_by', async () => {
+    const s = await A.client.from('training_jobs').insert({ model_id: modelId, status: 'running' })
+    expect(s.error).not.toBeNull()
+    const c = await A.client.from('training_jobs').insert({ model_id: modelId, claimed_by: 'me' })
+    expect(c.error).not.toBeNull()
   })
 
   it('A cannot update job status (worker only)', async () => {
@@ -151,19 +216,25 @@ describe.skipIf(!enabled)('RLS and job queue', () => {
     expect(reap.error?.message).toMatch(/permission denied/i)
   })
 
-  it('exactly one of two concurrent workers claims the job', async () => {
+  it('two concurrent claims hand out two distinct jobs, each exactly once', async () => {
     const [c1, c2] = await Promise.all([
       admin!.rpc('claim_training_job', { p_worker_id: 'w1' }),
       admin!.rpc('claim_training_job', { p_worker_id: 'w2' }),
     ])
     expect(c1.error).toBeNull()
     expect(c2.error).toBeNull()
-    const winners = [c1.data, c2.data].filter((d) => Array.isArray(d) && d.length === 1)
-    expect(winners).toHaveLength(1)
-    const claimed = winners[0]![0]
-    expect(claimed.status).toBe('claimed')
-    expect(claimed.claimed_by).toMatch(/^w[12]$/)
-    expect(claimed.attempt).toBe(1)
+    // Our two backdated jobs are the oldest in the queue, so they are what the
+    // two calls receive: one each, never the same row twice (SKIP LOCKED).
+    const got = [c1.data, c2.data].map((d) => (Array.isArray(d) && d.length === 1 ? d[0] : null))
+    expect(got.every(Boolean)).toBe(true)
+    expect(new Set(got.map((j) => j!.id))).toEqual(new Set([jobId, jobId2]))
+    for (const j of got) {
+      expect(j!.status).toBe('claimed')
+      expect(j!.claimed_by).toMatch(/^w[12]$/)
+      expect(j!.attempt).toBe(1)
+    }
+    const rows = await admin!.from('training_jobs').select('id, claimed_by').in('id', [jobId, jobId2])
+    expect(rows.data?.map((r) => r.claimed_by).sort()).toEqual(['w1', 'w2'])
   })
 
   // ---- training_metrics --------------------------------------------------
@@ -189,7 +260,8 @@ describe.skipIf(!enabled)('RLS and job queue', () => {
     const stale = new Date(Date.now() - 10 * 60 * 1000).toISOString()
     await admin!.from('training_jobs').update({ heartbeat_at: stale }).eq('id', jobId)
     const r1 = await admin!.rpc('reap_stale_jobs', { p_stale_after: '5 minutes', p_max_attempts: 3 })
-    expect(r1.data).toBe(1)
+    expect(r1.error).toBeNull()
+    expect(r1.data).toBeGreaterThanOrEqual(1) // ours, plus whatever else in the project was stale
     const after1 = await admin!.from('training_jobs').select('status,claimed_by,attempt').eq('id', jobId).single()
     expect(after1.data).toMatchObject({ status: 'queued', claimed_by: null, attempt: 1 })
 

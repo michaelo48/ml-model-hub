@@ -85,13 +85,26 @@ script using `@supabase/supabase-js`:
    `model_artifacts`, `predictions_log`. All should return zero rows.
 6. As A: try to update the job's `status`. It should affect zero rows.
 7. As A: call `rpc('claim_training_job')`. Expect `permission denied for function`.
-8. As admin: call `claim_training_job` twice concurrently for one queued job.
-   Exactly one call should return the row.
+7b. As A: insert a job with `created_at: '1970-01-01'`, `attempt: 5` and the
+   worker-owned timestamps / `error_message` set. The insert succeeds but the
+   stored row has `created_at = now()`, `attempt = 0` and null `claimed_at` /
+   `started_at` / `heartbeat_at` / `finished_at` / `error_message`: the
+   `training_jobs_0_sanitize_insert` trigger overrides client values for
+   authenticated sessions, so nobody can jump the queue (ordered by
+   `created_at`) or buy extra retries. `status` and `claimed_by` are still
+   rejected outright by the insert policy. The worker (secret key,
+   `auth.uid()` null) is untouched.
+8. As admin: call `claim_training_job` twice concurrently with two queued jobs
+   you own (backdate them as admin so they are the oldest in the project).
+   Each call returns a different one of your two jobs; neither is returned twice.
 9. As admin: insert `training_metrics` for the job. A should read them; B should
    read none; A should not be able to insert one.
 10. As admin: set `heartbeat_at` 10 minutes in the past, call
     `reap_stale_jobs('5 minutes', 3)`. Job returns to `queued`, `claimed_by` is
-    null. Set `attempt = 3` and repeat: job becomes `failed` with an error message.
+    null, and the model's status follows (`training` -> `queued`). Set
+    `attempt = 3` and repeat: job becomes `failed` with an error message and
+    the model becomes `failed` (migration `20260819090000_reaper_model_status`;
+    covered by `pnpm test:integration`).
 11. Storage, as A: upload to `datasets/<A>/x.csv` (ok). As B: upload to
     `datasets/<A>/y.csv` (fail), list `datasets/<A>` (empty). As A: upload to
     `models/<A>/x.json` (fail).

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { DivergenceError } from '../errors'
 import { fitLinearGd } from '../linear/gd'
 import { fitOls, predictLinear } from '../linear/ols'
 import { mse } from '../metrics'
@@ -93,7 +94,7 @@ describe('trainGradient / fitLinearGd', () => {
 
   it('throws a clear error when the learning rate diverges', () => {
     const { X, y } = makeRegression()
-    expect(() => fitLinearGd(X, y, { ...base, learning_rate: 20, epochs: 500 })).toThrow(/diverged/)
+    expect(() => fitLinearGd(X, y, { ...base, learning_rate: 20, epochs: 500 })).toThrow(DivergenceError)
   })
 
   it('handles a constant feature (weight stays 0, no NaN)', () => {
