@@ -59,6 +59,33 @@ export function FormMessage({
 
 export function SubmitButton({
   pending,
+  pendingLabel = 'Working...',
+  disabled,
+  type = 'submit',
+  onClick,
+  children,
+}: {
+  pending: boolean
+  pendingLabel?: string
+  disabled?: boolean
+  type?: 'submit' | 'button'
+  onClick?: () => void
+  children: ReactNode
+}) {
+  return (
+    <button
+      type={type}
+      onClick={onClick}
+      disabled={pending || disabled}
+      className="h-9 w-full rounded-sm bg-accent text-sm font-medium text-accent-fg hover:bg-accent-hover disabled:opacity-60"
+    >
+      {pending ? pendingLabel : children}
+    </button>
+  )
+}
+
+export function DangerButton({
+  pending,
   children,
 }: {
   pending: boolean
@@ -68,7 +95,7 @@ export function SubmitButton({
     <button
       type="submit"
       disabled={pending}
-      className="h-9 w-full rounded-sm bg-accent text-sm font-medium text-accent-fg hover:bg-accent-hover disabled:opacity-60"
+      className="h-8 rounded-sm border border-danger/50 px-3 text-sm text-danger hover:bg-danger/5 disabled:opacity-60"
     >
       {pending ? 'Working...' : children}
     </button>
