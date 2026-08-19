@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/server'
 import type { ActionResult } from '@/lib/result'
 import type { Json } from '@/lib/supabase/database.types'
 import { columnsSchema } from '@/lib/csv/infer'
+import { dbErrorMessage } from '@/lib/limits'
 
 function fieldErrorsFrom(error: z.ZodError): Record<string, string> {
   const out: Record<string, string> = {}
@@ -115,7 +116,9 @@ export async function enqueueTraining(modelId: string): Promise<ActionResult<{ j
     .insert({ model_id: modelId })
     .select('id')
     .single()
-  if (error || !job) return { ok: false, error: error?.message ?? 'Could not enqueue job.' }
+  const enqueueFailed = 'Could not enqueue the training job. Try again.'
+  if (error) return { ok: false, error: dbErrorMessage(error, 'enqueueTraining', enqueueFailed) }
+  if (!job) return { ok: false, error: enqueueFailed }
 
   await supabase.from('models').update({ status: 'queued' }).eq('id', modelId)
 

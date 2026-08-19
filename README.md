@@ -59,14 +59,30 @@ pnpm typecheck && pnpm lint
 Phase 1 in progress. See [CLAUDE.md](CLAUDE.md) for the full spec and phase plan.
 
 - [x] Auth (email/password + GitHub), profiles
-- [x] Monorepo, `packages/ml` with tested OLS, worker skeleton
+- [x] Monorepo, `packages/ml` with tested OLS, batch GD, SGD, Adam and logistic regression, worker skeleton
 - [x] Phase 1 schema + RLS + storage policies ([docs/rls-testing.md](docs/rls-testing.md))
 - [x] Dataset upload (client preview, storage, server validation, column metadata)
+- [x] Per-user usage limits and rate limiting (datasets, uploads, edits, training jobs)
 - [x] Model builder (dataset, task, target, features, optimizer + hyperparameters; enqueue job)
 - [ ] Worker training loop + Realtime metrics
 - [ ] Training page with live loss curve
 - [ ] Inference endpoint + API keys
 - [ ] Deployed (Vercel + Fly.io)
+
+## Usage limits
+
+To keep a demo deployment from being abused, per-user limits are enforced in Postgres (triggers + storage policies, see [docs/rls-testing.md](docs/rls-testing.md#usage-limits-_usage_limitssql)) and can be tuned without a deploy:
+
+| Limit | Default |
+| --- | --- |
+| Datasets kept per user | 3 |
+| Dataset uploads per hour | 10 |
+| Dataset edits per hour | 30 |
+| Training jobs enqueued per hour | 10 |
+
+```sql
+update public.app_limits set value = 5 where key = 'max_datasets_per_user';
+```
 
 ## Deployment
 

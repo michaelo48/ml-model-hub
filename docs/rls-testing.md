@@ -27,16 +27,40 @@ browser path only. Server code using the secret key must scope its own queries.
 | `model_artifacts` | via own model | no (worker) | no | no |
 | `api_keys` | own | own, and model must be own | own | own |
 | `predictions_log` | via own model | no (server) | no | no |
+| `app_limits` | all (authenticated) | no | no | no |
+| `rate_limit_events` | no | no (trigger only) | no | no |
 
 Storage:
 
 | Bucket | user select | user insert/update/delete |
 | --- | --- | --- |
-| `datasets` | own folder (`<user_id>/...`) | own folder |
+| `datasets` | own folder (`<user_id>/...`) | own folder, and only the next expected object of one of the user's `datasets` rows: `<user_id>/<dataset_id>.csv` while `status = 'uploading'`, or `<user_id>/<dataset_id>.v<k+1>.csv` while `ready` where `k` is the version currently in `storage_path` |
 | `models` | own folder | no (worker writes) |
 
-Worker-only functions: `claim_training_job(text)`, `reap_stale_jobs(interval, int)`.
-`EXECUTE` is revoked from `anon` and `authenticated`.
+Worker-only functions: `claim_training_job(text)`, `reap_stale_jobs(interval, int)`,
+`assert_rate_limit(uuid, text, text, interval, text)`. `EXECUTE` is revoked from
+`anon` and `authenticated`.
+
+## Usage limits (`*_usage_limits.sql`)
+
+Limits are enforced by `BEFORE` triggers running as `security definer`, so
+they hold for any client using a user JWT. Sessions without `auth.uid()`
+(worker, seed script) are exempt. Values live in `public.app_limits`:
+
+| key | default | enforced on |
+| --- | --- | --- |
+| `max_datasets_per_user` | 3 | `datasets` insert: total rows per user, any status (uploads that fail validation are deleted, so they do not count) |
+| `dataset_uploads_per_hour` | 10 | `datasets` insert: sliding 1 h window |
+| `dataset_edits_per_hour` | 30 | `datasets` update of `storage_path` (missing-values rewrites) |
+| `training_jobs_per_hour` | 10 | `training_jobs` insert, keyed by the model owner |
+
+Change a limit with `update public.app_limits set value = 5 where key = 'max_datasets_per_user';`.
+Rejections raise SQLSTATE `54000` with a user-readable message, e.g.
+"Rate limit reached: at most 10 dataset uploads per hour. Try again later."; the
+web app surfaces that message as-is and logs every other database error
+server-side (`dbErrorMessage` in `apps/web/src/lib/limits.ts`). Windows are counted from `rate_limit_events`,
+which users cannot read or delete, so create/delete churn does not reset them.
+Concurrent requests are serialized per user with an advisory lock.
 
 ## Automated test
 

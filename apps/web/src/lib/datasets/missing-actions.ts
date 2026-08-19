@@ -7,6 +7,7 @@ import type { ActionResult } from '@/lib/result'
 import type { Json } from '@/lib/supabase/database.types'
 import { DATASETS_BUCKET, analyzeCsv, columnsSchema, type ColumnMeta } from '@/lib/csv/infer'
 import { parseCsvText, unparseCsv } from '@/lib/csv/parse'
+import { dbErrorMessage } from '@/lib/limits'
 import {
   applyMissingFixes,
   buildMissingReport,
@@ -152,7 +153,7 @@ export async function applyMissingFixesAction(datasetId: string, input: MissingF
     .eq('id', ds.id)
   if (dbErr) {
     await supabase.storage.from(DATASETS_BUCKET).remove([newPath])
-    return { ok: false, error: dbErr.message }
+    return { ok: false, error: dbErrorMessage(dbErr, 'applyMissingFixes', 'Could not save the edited dataset. Try again.') }
   }
   // Keep only the original and the current version.
   if (ds.storage_path !== originalPath(userId, ds.id)) {

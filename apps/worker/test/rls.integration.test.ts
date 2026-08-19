@@ -63,7 +63,13 @@ describe.skipIf(!enabled)('RLS and job queue', () => {
 
   afterAll(async () => {
     if (!admin) return
-    await admin.storage.from('datasets').remove([`${A?.id}/test.csv`]).catch(() => undefined)
+    for (const u of [A, B]) {
+      if (!u) continue
+      const objs = await admin.storage.from('datasets').list(u.id)
+      const names = (objs.data ?? []).map((o) => `${u.id}/${o.name}`)
+      if (names.length) await admin.storage.from('datasets').remove(names).catch(() => undefined)
+      await admin.from('rate_limit_events').delete().eq('user_id', u.id)
+    }
     if (A) await admin.auth.admin.deleteUser(A.id)
     if (B) await admin.auth.admin.deleteUser(B.id)
   })
@@ -225,24 +231,135 @@ describe.skipIf(!enabled)('RLS and job queue', () => {
 
   // ---- storage -----------------------------------------------------------
 
-  it('storage: own-folder writes only in datasets; models bucket read-only', async () => {
+  it('storage: only the next expected object of an owned dataset is writable; models bucket read-only', async () => {
     const csv = new Blob(['a,b\n1,2\n'], { type: 'text/csv' })
-    const up = await A.client.storage.from('datasets').upload(`${A.id}/test.csv`, csv)
+
+    // Precondition: A must be under the dataset cap to reserve one more row.
+    const { data: lim } = await admin!.from('app_limits').select('value').eq('key', 'max_datasets_per_user').single()
+    const { count } = await admin!.from('datasets').select('id', { count: 'exact', head: true }).eq('user_id', A.id)
+    expect(count!, 'test setup: A must be below max_datasets_per_user').toBeLessThan(lim!.value)
+
+    // No dataset row -> denied, even inside A's own folder.
+    const orphan = await A.client.storage.from('datasets').upload(`${A.id}/orphan.csv`, csv)
+    expect(orphan.error).not.toBeNull()
+
+    // Reserve a row the way createDataset does, then exactly that path is allowed.
+    const id = crypto.randomUUID()
+    const reserve = await A.client
+      .from('datasets')
+      .insert({ id, user_id: A.id, name: 'upload', storage_path: `${A.id}/${id}.csv`, status: 'uploading' })
+    expect(reserve.error).toBeNull()
+    // While uploading, edited versions are not yet allowed.
+    const early = await A.client.storage.from('datasets').upload(`${A.id}/${id}.v1.csv`, csv)
+    expect(early.error).not.toBeNull()
+    const up = await A.client.storage.from('datasets').upload(`${A.id}/${id}.csv`, csv)
     expect(up.error).toBeNull()
 
-    const evil = await B.client.storage.from('datasets').upload(`${A.id}/evil.csv`, csv)
+    // Once ready: the original path is locked, only version k+1 is writable.
+    await A.client.from('datasets').update({ status: 'ready' }).eq('id', id)
+    await admin!.storage.from('datasets').remove([`${A.id}/${id}.csv`])
+    const again = await A.client.storage.from('datasets').upload(`${A.id}/${id}.csv`, csv)
+    expect(again.error).not.toBeNull()
+    for (const bad of [`${id}.v2.csv`, `${id}.v999.csv`, `${id}.vfoo.csv`, `${id}.v1.csv.bak`, `${id}.v1/x.csv`]) {
+      const r = await A.client.storage.from('datasets').upload(`${A.id}/${bad}`, csv)
+      expect(r.error, bad).not.toBeNull()
+    }
+    const v1 = await A.client.storage.from('datasets').upload(`${A.id}/${id}.v1.csv`, csv)
+    expect(v1.error).toBeNull()
+    // v1 is not current in storage_path yet, so v2 is still not allowed...
+    const v2early = await A.client.storage.from('datasets').upload(`${A.id}/${id}.v2.csv`, csv)
+    expect(v2early.error).not.toBeNull()
+    // ...until the row points at v1 (this update is also what the edit rate limit counts).
+    const point = await A.client.from('datasets').update({ storage_path: `${A.id}/${id}.v1.csv` }).eq('id', id)
+    expect(point.error).toBeNull()
+    const v2 = await A.client.storage.from('datasets').upload(`${A.id}/${id}.v2.csv`, csv)
+    expect(v2.error).toBeNull()
+
+    const evil = await B.client.storage.from('datasets').upload(`${A.id}/${id}.v3.csv`, csv)
     expect(evil.error).not.toBeNull()
 
     const list = await B.client.storage.from('datasets').list(A.id)
     expect(list.data ?? []).toEqual([])
 
     // UPDATE policy WITH CHECK: A cannot move an object into B's folder.
-    const move = await A.client.storage.from('datasets').move(`${A.id}/test.csv`, `${B.id}/test.csv`)
+    const move = await A.client.storage.from('datasets').move(`${A.id}/${id}.v1.csv`, `${B.id}/${id}.v1.csv`)
     expect(move.error).not.toBeNull()
     const stillThere = await admin!.storage.from('datasets').list(A.id)
-    expect(stillThere.data?.some((o) => o.name === 'test.csv')).toBe(true)
+    expect(stillThere.data?.some((o) => o.name === `${id}.v1.csv`)).toBe(true)
 
     const art = await A.client.storage.from('models').upload(`${A.id}/x.json`, new Blob(['{}']))
     expect(art.error).not.toBeNull()
+
+    await A.client.from('datasets').delete().eq('id', id)
+  })
+
+  // ---- usage limits --------------------------------------------------------
+
+  it('limits: app_limits is readable, rate_limit_events is not', async () => {
+    const limits = await A.client.from('app_limits').select('key, value')
+    expect(limits.error).toBeNull()
+    expect(limits.data?.some((l) => l.key === 'max_datasets_per_user')).toBe(true)
+
+    const events = await A.client.from('rate_limit_events').select('id')
+    expect(events.data ?? []).toEqual([])
+    const insert = await A.client.from('rate_limit_events').insert({ user_id: A.id, action: 'x' })
+    expect(insert.error).not.toBeNull()
+  })
+
+  it('limits: dataset cap per user, and deleting does not reset the hourly upload window', async () => {
+    const { data: lim } = await admin!.from('app_limits').select('key, value')
+    const maxDatasets = lim!.find((l) => l.key === 'max_datasets_per_user')!.value
+    const perHour = lim!.find((l) => l.key === 'dataset_uploads_per_hour')!.value
+    // The scenario below needs headroom in the hourly window to hit the cap first.
+    expect(perHour, 'test assumes dataset_uploads_per_hour > max_datasets_per_user').toBeGreaterThan(maxDatasets)
+
+    // Preconditions: B has no datasets and no upload events yet.
+    const { count: bCount } = await admin!.from('datasets').select('id', { count: 'exact', head: true }).eq('user_id', B.id)
+    expect(bCount, 'test setup: B must own no datasets').toBe(0)
+    const { count: bEvents } = await admin!
+      .from('rate_limit_events')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', B.id)
+    expect(bEvents, 'test setup: B must have no rate-limit events').toBe(0)
+
+    const mk = () =>
+      B.client
+        .from('datasets')
+        .insert({ user_id: B.id, name: 'd', storage_path: `${B.id}/${crypto.randomUUID()}.csv`, status: 'ready' })
+        .select('id')
+        .single()
+
+    const ids: string[] = []
+    for (let i = 0; i < maxDatasets; i++) {
+      const r = await mk()
+      expect(r.error).toBeNull()
+      ids.push(r.data!.id)
+    }
+    const overCap = await mk()
+    expect(overCap.error?.code).toBe('54000')
+    expect(overCap.error?.message).toBe(
+      `Dataset limit reached: you can keep at most ${maxDatasets} dataset${maxDatasets === 1 ? '' : 's'}. Delete one to upload another.`
+    )
+
+    // Free a slot, then churn create+delete until the hourly window is exhausted.
+    await B.client.from('datasets').delete().eq('id', ids[0]!)
+    let created = maxDatasets
+    while (created < perHour) {
+      const r = await mk()
+      expect(r.error).toBeNull()
+      await B.client.from('datasets').delete().eq('id', r.data!.id)
+      created++
+    }
+    const throttled = await mk()
+    expect(throttled.error?.code).toBe('54000')
+    expect(throttled.error?.message).toBe(
+      `Rate limit reached: at most ${perHour} dataset uploads per hour. Try again later.`
+    )
+
+    // The worker (secret key) is exempt from user limits.
+    const worker = await admin!
+      .from('datasets')
+      .insert({ user_id: B.id, name: 'seed', storage_path: `${B.id}/${crypto.randomUUID()}.csv`, status: 'ready' })
+    expect(worker.error).toBeNull()
   })
 })

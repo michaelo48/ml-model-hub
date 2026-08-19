@@ -7,6 +7,7 @@ import type { ActionResult } from '@/lib/result'
 import type { Json } from '@/lib/supabase/database.types'
 import { DATASET_LIMITS, DATASETS_BUCKET, analyzeCsv, type ColumnMeta } from '@/lib/csv/infer'
 import { parseCsvText } from '@/lib/csv/parse'
+import { dbErrorMessage } from '@/lib/limits'
 
 const BUCKET = DATASETS_BUCKET
 
@@ -39,6 +40,8 @@ export async function createDataset(input: {
   } = await supabase.auth.getUser()
   if (!user) return { ok: false, error: 'Not signed in.' }
 
+  // The database trigger is the gate for the per-user cap and the hourly upload
+  // rate; both reject with SQLSTATE 54000 and a message meant for the user.
   const id = crypto.randomUUID()
   const storagePath = `${user.id}/${id}.csv`
 
@@ -50,7 +53,7 @@ export async function createDataset(input: {
     size_bytes: parsed.data.sizeBytes,
     status: 'uploading',
   })
-  if (error) return { ok: false, error: error.message }
+  if (error) return { ok: false, error: dbErrorMessage(error, 'createDataset', 'Could not create the dataset. Try again.') }
 
   return { ok: true, data: { id, storagePath } }
 }
@@ -80,8 +83,13 @@ export async function finalizeDataset(
   if (dsErr || !ds) return { ok: false, error: 'Dataset not found.' }
   if (ds.status !== 'uploading') return { ok: true, data: { status: ds.status === 'ready' ? 'ready' : 'invalid' } }
 
+  // A file that failed validation is of no use: drop the row (so it does not
+  // count against the dataset cap) and the object, and hand the reason back to
+  // the upload form. Best effort: an orphaned object is harmless.
   const markInvalid = async (message: string) => {
-    await supabase.from('datasets').update({ status: 'invalid', error: message }).eq('id', datasetId)
+    const { error: delErr } = await supabase.from('datasets').delete().eq('id', datasetId)
+    if (delErr) console.error('[finalizeDataset] could not delete invalid dataset row', { datasetId, error: delErr.message })
+    await supabase.storage.from(BUCKET).remove([ds.storage_path])
     revalidatePath('/dashboard')
     return { ok: true as const, data: { status: 'invalid' as const, error: message } }
   }
@@ -108,7 +116,7 @@ export async function finalizeDataset(
       columns: columns as unknown as Json,
     })
     .eq('id', datasetId)
-  if (upErr) return { ok: false, error: upErr.message }
+  if (upErr) return { ok: false, error: dbErrorMessage(upErr, 'finalizeDataset', 'Could not save the dataset. Try again.') }
 
   revalidatePath('/dashboard')
   revalidatePath(`/datasets/${datasetId}`)

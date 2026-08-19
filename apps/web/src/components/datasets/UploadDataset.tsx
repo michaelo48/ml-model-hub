@@ -39,7 +39,7 @@ const PHASE_LABEL: Record<Exclude<Phase['kind'], 'idle' | 'error'>, string> = {
   validating: 'Validating...',
 }
 
-export function UploadDataset() {
+export function UploadDataset({ disabled = false }: { disabled?: boolean }) {
   const router = useRouter()
   const [preview, setPreview] = useState<Preview | null>(null)
   const [name, setName] = useState('')
@@ -94,13 +94,14 @@ export function UploadDataset() {
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
+    disabled,
     multiple: false,
     maxSize: DATASET_LIMITS.maxBytes,
     accept: { 'text/csv': ['.csv'], 'application/vnd.ms-excel': ['.csv'], 'text/plain': ['.csv'] },
   })
 
   const busy = phase.kind === 'reserving' || phase.kind === 'uploading' || phase.kind === 'validating'
-  const canUpload = !!preview && !preview.error && name.trim().length > 0 && !busy
+  const canUpload = !disabled && !!preview && !preview.error && name.trim().length > 0 && !busy
 
   async function upload() {
     if (!preview || preview.error) return
@@ -141,8 +142,12 @@ export function UploadDataset() {
       <div
         {...getRootProps()}
         className={[
-          'cursor-pointer rounded-sm border border-dashed px-6 py-10 text-center text-sm',
-          isDragActive ? 'border-accent bg-accent/5 text-fg' : 'border-line bg-surface text-fg-muted hover:border-fg-muted',
+          'rounded-sm border border-dashed px-6 py-10 text-center text-sm',
+          disabled
+            ? 'cursor-not-allowed border-line bg-surface text-fg-muted opacity-60'
+            : isDragActive
+              ? 'cursor-pointer border-accent bg-accent/5 text-fg'
+              : 'cursor-pointer border-line bg-surface text-fg-muted hover:border-fg-muted',
         ].join(' ')}
       >
         <input {...getInputProps()} />

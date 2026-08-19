@@ -58,6 +58,48 @@ export type Database = {
           },
         ]
       }
+      app_limits: {
+        Row: {
+          description: string
+          key: string
+          updated_at: string
+          value: number
+        }
+        Insert: {
+          description: string
+          key: string
+          updated_at?: string
+          value: number
+        }
+        Update: {
+          description?: string
+          key?: string
+          updated_at?: string
+          value?: number
+        }
+        Relationships: []
+      }
+      rate_limit_events: {
+        Row: {
+          action: string
+          created_at: string
+          id: number
+          user_id: string
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          id?: never
+          user_id: string
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          id?: never
+          user_id?: string
+        }
+        Relationships: []
+      }
       datasets: {
         Row: {
           columns: Json | null
@@ -357,6 +399,18 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      assert_rate_limit: {
+        Args: { p_action_label: string; p_limit_key: string; p_user: string; p_window: string; p_window_label: string }
+        Returns: undefined
+      }
+      is_own_dataset_object: {
+        Args: { p_name: string }
+        Returns: boolean
+      }
+      limit_value: {
+        Args: { p_key: string }
+        Returns: number
+      }
       claim_training_job: {
         Args: { p_worker_id: string }
         Returns: {
