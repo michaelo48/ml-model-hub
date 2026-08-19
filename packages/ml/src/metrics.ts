@@ -32,3 +32,23 @@ export function r2(yTrue: Vector, yPred: Vector): number {
   if (ssTot === 0) return ssRes === 0 ? 1 : 0
   return 1 - ssRes / ssTot
 }
+
+/** Binary cross-entropy for probabilities in [0, 1]; clipped to avoid log(0). */
+export function logLoss(yTrue: Vector, yProb: Vector): number {
+  assertSameLength(yTrue, yProb, 'logLoss')
+  const eps = 1e-15
+  let s = 0
+  for (let i = 0; i < yTrue.length; i++) {
+    const p = Math.min(1 - eps, Math.max(eps, yProb[i]!))
+    s += yTrue[i]! === 1 ? -Math.log(p) : -Math.log(1 - p)
+  }
+  return s / yTrue.length
+}
+
+/** Fraction of exactly matching labels. */
+export function accuracy(yTrue: Vector, yPred: Vector): number {
+  assertSameLength(yTrue, yPred, 'accuracy')
+  let hits = 0
+  for (let i = 0; i < yTrue.length; i++) if (yTrue[i] === yPred[i]) hits++
+  return hits / yTrue.length
+}
