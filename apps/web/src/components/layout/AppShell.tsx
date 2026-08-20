@@ -72,3 +72,17 @@ export function StatusBadge({ status }: { status: string }) {
     </span>
   )
 }
+
+/**
+ * One labelled figure in a `<dl>` row. Monospace and tabular so a row of
+ * numbers stays column-aligned as values change (training page) or differ in
+ * magnitude (model metrics).
+ */
+export function Stat({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div>
+      <dt className="text-xs text-fg-muted">{label}</dt>
+      <dd className="mt-0.5 font-mono text-sm tabular-nums">{children}</dd>
+    </div>
+  )
+}
