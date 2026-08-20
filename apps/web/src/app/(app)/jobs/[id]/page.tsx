@@ -1,47 +1,53 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
+import { hyperparametersSchema, OPTIMIZER_LABELS } from '@modelforge/ml'
 import { createClient } from '@/lib/supabase/server'
-import { PageHeader, StatusBadge } from '@/components/layout/AppShell'
+import { fetchAllMetrics, metricsWindow } from '@/lib/training/metrics'
+import { formatUtc } from '@/lib/time'
+import { PageHeader } from '@/components/layout/AppShell'
+import { LiveTraining } from '@/components/training/LiveTraining'
 
 export const metadata: Metadata = { title: 'Training job' }
 
+/**
+ * Training page. The server render seeds the job row and every metric of the
+ * current attempt already written (so a refresh or a late visit shows the
+ * full curve instantly); the client component then subscribes to Realtime
+ * for the rest.
+ */
 export default async function JobDetailPage({ params }: PageProps<'/jobs/[id]'>) {
   const { id } = await params
   const supabase = await createClient()
   const { data: job } = await supabase
     .from('training_jobs')
-    .select('*, models(id, name)')
+    .select('*, models(id, name, hyperparameters)')
     .eq('id', id)
     .maybeSingle()
   if (!job) notFound()
 
+  const { models: model, ...jobRow } = job
+  const points = await fetchAllMetrics(supabase, id, metricsWindow(jobRow))
+
+  const hp = hyperparametersSchema.safeParse(model?.hyperparameters)
+  // OLS reports one synthetic epoch; every GD optimizer reports hp.epochs.
+  const totalEpochs = hp.success ? (hp.data.optimizer === 'ols' ? 1 : hp.data.epochs) : null
+  const optimizerLabel = hp.success ? OPTIMIZER_LABELS[hp.data.optimizer] : null
+
   return (
     <>
       <PageHeader
-        title={`Training ${job.models?.name ?? ''}`}
-        description={`Job ${job.id.slice(0, 8)}, queued ${new Date(job.created_at).toLocaleString()}`}
+        title={`Training ${model?.name ?? ''}`}
+        description={[`Job ${job.id.slice(0, 8)}`, optimizerLabel, `queued ${formatUtc(job.created_at)}`]
+          .filter(Boolean)
+          .join(', ')}
         action={
           <Link href={`/models/${job.model_id}`} className="text-sm text-fg-muted hover:text-fg">
             Back to model
           </Link>
         }
       />
-      <div className="mb-6 flex items-center gap-3 text-sm">
-        <StatusBadge status={job.status} />
-        {job.claimed_by ? <span className="font-mono text-xs text-fg-muted">worker {job.claimed_by}</span> : null}
-        {job.attempt > 1 ? <span className="font-mono text-xs text-fg-muted">attempt {job.attempt}</span> : null}
-      </div>
-      {job.error_message ? (
-        <p role="alert" className="mb-6 rounded-sm border border-danger/40 bg-danger/5 px-3 py-2 text-sm text-danger">
-          {job.error_message}
-        </p>
-      ) : null}
-      <p className="text-sm text-fg-muted">
-        {job.status === 'queued'
-          ? 'Waiting for a worker to pick this job up.'
-          : 'Live loss curve arrives with the next step (worker + Realtime).'}
-      </p>
+      <LiveTraining initialJob={jobRow} initialPoints={points} totalEpochs={totalEpochs} modelId={job.model_id} />
     </>
   )
 }
