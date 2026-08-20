@@ -6,7 +6,8 @@ import { createClient } from '@/lib/supabase/server'
 import { formatDuration, formatNumber } from '@/lib/charts/scale'
 import { isTerminal } from '@/lib/training/metrics'
 import { formatUtc } from '@/lib/time'
-import { PageHeader, Stat, StatusBadge } from '@/components/layout/AppShell'
+import { Empty, PageHeader, Stat, StatusBadge } from '@/components/layout/AppShell'
+import { Num, Th } from '@/components/ui/table'
 import { ModelActions } from '@/components/models/ModelActions'
 
 export const metadata: Metadata = { title: 'Model' }
@@ -52,7 +53,8 @@ export default async function ModelPage({ params }: PageProps<'/models/[id]'>) {
   const jobById = new Map((jobs ?? []).map((j) => [j.id, j]))
   const regression = model.task === 'regression'
   // Artifacts come back version-descending and predictions use the highest
-  // version (CLAUDE.md §4), so the first row is what the endpoint serves.
+  // version (CLAUDE.md §4), so the first row is what the endpoint serves. The
+  // predict route must pick its artifact the same way or the badge below lies.
   const serving = artifacts?.[0]
   const servingMetrics = serving ? artifactMetricsSchema.safeParse(serving.metrics) : null
 
@@ -65,7 +67,7 @@ export default async function ModelPage({ params }: PageProps<'/models/[id]'>) {
       />
 
       <dl className="mb-6 grid grid-cols-2 gap-x-8 gap-y-3 text-sm sm:grid-cols-4">
-        <Item label="Status">
+        <Stat label="Status" prose>
           <span className="flex items-center gap-2">
             <StatusBadge status={model.status} />
             {activeJob ? (
@@ -74,27 +76,19 @@ export default async function ModelPage({ params }: PageProps<'/models/[id]'>) {
               </Link>
             ) : null}
           </span>
-        </Item>
-        <Item label="Dataset">
+        </Stat>
+        <Stat label="Dataset" prose>
           <Link href={`/datasets/${model.datasets?.id}`} className="text-fg hover:text-accent">
             {model.datasets?.name ?? '-'}
           </Link>
           <span className="ml-1 font-mono text-xs text-fg-muted">
             {model.datasets?.row_count?.toLocaleString('en-US') ?? '?'} rows
           </span>
-        </Item>
-        <Item label="Task">
-          <span className="font-mono text-xs">{model.task}</span>
-        </Item>
-        <Item label="Algorithm">
-          <span className="font-mono text-xs">{model.algorithm}</span>
-        </Item>
-        <Item label="Target">
-          <span className="font-mono text-xs">{model.target_column}</span>
-        </Item>
-        <Item label={`Features (${model.feature_columns.length})`}>
-          <span className="font-mono text-xs">{model.feature_columns.join(', ')}</span>
-        </Item>
+        </Stat>
+        <Stat label="Task">{model.task}</Stat>
+        <Stat label="Algorithm">{model.algorithm}</Stat>
+        <Stat label="Target">{model.target_column}</Stat>
+        <Stat label={`Features (${model.feature_columns.length})`}>{model.feature_columns.join(', ')}</Stat>
       </dl>
 
       {latestJob?.status === 'failed' && latestJob.error_message ? (
@@ -116,7 +110,7 @@ export default async function ModelPage({ params }: PageProps<'/models/[id]'>) {
         {!serving ? (
           <Empty>No trained version yet. Press Train to run this configuration against the dataset.</Empty>
         ) : !servingMetrics?.success ? (
-          <Empty>This version was written in an older metrics format and cannot be summarized.</Empty>
+          <Empty>This version&apos;s metrics could not be read.</Empty>
         ) : (
           <dl className="grid grid-cols-2 gap-x-8 gap-y-3 rounded-sm border border-line bg-surface px-4 py-3 sm:grid-cols-6">
             <Stat label={regression ? 'Train MSE' : 'Log loss'}>{formatNumber(servingMetrics.data.train_loss)}</Stat>
@@ -144,23 +138,21 @@ export default async function ModelPage({ params }: PageProps<'/models/[id]'>) {
             <table className="w-full border-collapse text-sm">
               <thead className="bg-surface text-left text-xs text-fg-muted">
                 <tr>
-                  <th className="border-b border-line px-3 py-1.5 font-medium">Version</th>
-                  <th className="border-b border-line px-3 py-1.5 text-right font-medium">
-                    {regression ? 'Train MSE' : 'Log loss'}
-                  </th>
+                  <Th>Version</Th>
+                  <Th right>{regression ? 'Train MSE' : 'Log loss'}</Th>
                   {regression ? (
                     <>
-                      <th className="border-b border-line px-3 py-1.5 text-right font-medium">RMSE</th>
-                      <th className="border-b border-line px-3 py-1.5 text-right font-medium">R²</th>
+                      <Th right>RMSE</Th>
+                      <Th right>R²</Th>
                     </>
                   ) : (
-                    <th className="border-b border-line px-3 py-1.5 text-right font-medium">Accuracy</th>
+                    <Th right>Accuracy</Th>
                   )}
-                  <th className="border-b border-line px-3 py-1.5 text-right font-medium">Rows</th>
-                  <th className="border-b border-line px-3 py-1.5 text-right font-medium">Epochs</th>
-                  <th className="border-b border-line px-3 py-1.5 text-right font-medium">Train time</th>
-                  <th className="border-b border-line px-3 py-1.5 font-medium">Job</th>
-                  <th className="border-b border-line px-3 py-1.5 text-right font-medium">Trained</th>
+                  <Th right>Rows</Th>
+                  <Th right>Epochs</Th>
+                  <Th right>Train time</Th>
+                  <Th>Job</Th>
+                  <Th right>Trained</Th>
                 </tr>
               </thead>
               <tbody>
@@ -205,27 +197,13 @@ export default async function ModelPage({ params }: PageProps<'/models/[id]'>) {
         <h2 className="mb-2 text-sm font-medium">Hyperparameters</h2>
         {hp.success ? (
           <dl className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm sm:grid-cols-5">
-            <Item label="Optimizer">
-              <span className="text-xs">{OPTIMIZER_LABELS[hp.data.optimizer]}</span>
-            </Item>
-            {shown.includes('learning_rate') ? (
-              <Item label="Learning rate">
-                <Mono>{hp.data.learning_rate}</Mono>
-              </Item>
-            ) : null}
-            {shown.includes('epochs') ? (
-              <Item label="Epochs">
-                <Mono>{hp.data.epochs}</Mono>
-              </Item>
-            ) : null}
-            {shown.includes('batch_size') ? (
-              <Item label="Batch size">
-                <Mono>{hp.data.batch_size}</Mono>
-              </Item>
-            ) : null}
-            <Item label="L2">
-              <Mono>{hp.data.l2}</Mono>
-            </Item>
+            <Stat label="Optimizer" prose>
+              <span className="text-sm">{OPTIMIZER_LABELS[hp.data.optimizer]}</span>
+            </Stat>
+            {shown.includes('learning_rate') ? <Stat label="Learning rate">{hp.data.learning_rate}</Stat> : null}
+            {shown.includes('epochs') ? <Stat label="Epochs">{hp.data.epochs}</Stat> : null}
+            {shown.includes('batch_size') ? <Stat label="Batch size">{hp.data.batch_size}</Stat> : null}
+            <Stat label="L2">{hp.data.l2}</Stat>
           </dl>
         ) : (
           <p className="text-sm text-fg-muted">Unreadable hyperparameters.</p>
@@ -241,11 +219,11 @@ export default async function ModelPage({ params }: PageProps<'/models/[id]'>) {
             <table className="w-full border-collapse text-sm">
               <thead className="bg-surface text-left text-xs text-fg-muted">
                 <tr>
-                  <th className="border-b border-line px-3 py-1.5 font-medium">Job</th>
-                  <th className="border-b border-line px-3 py-1.5 font-medium">Status</th>
-                  <th className="border-b border-line px-3 py-1.5 text-right font-medium">Attempt</th>
-                  <th className="border-b border-line px-3 py-1.5 text-right font-medium">Queued</th>
-                  <th className="border-b border-line px-3 py-1.5 text-right font-medium">Duration</th>
+                  <Th>Job</Th>
+                  <Th>Status</Th>
+                  <Th right>Attempt</Th>
+                  <Th right>Queued</Th>
+                  <Th right>Duration</Th>
                 </tr>
               </thead>
               <tbody>
@@ -259,9 +237,9 @@ export default async function ModelPage({ params }: PageProps<'/models/[id]'>) {
                     <td className="px-3 py-2">
                       <StatusBadge status={j.status} />
                     </td>
-                    <td className="px-3 py-2 text-right font-mono text-xs">{j.attempt}</td>
-                    <td className="px-3 py-2 text-right font-mono text-xs text-fg-muted">{formatUtc(j.created_at)}</td>
-                    <td className="px-3 py-2 text-right font-mono text-xs text-fg-muted">{duration(j)}</td>
+                    <Num>{j.attempt}</Num>
+                    <Num muted>{formatUtc(j.created_at)}</Num>
+                    <Num muted>{duration(j)}</Num>
                   </tr>
                 ))}
               </tbody>
@@ -270,26 +248,6 @@ export default async function ModelPage({ params }: PageProps<'/models/[id]'>) {
         )}
       </section>
     </>
-  )
-}
-
-function Item({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <dt className="text-xs text-fg-muted">{label}</dt>
-      <dd className="mt-0.5">{children}</dd>
-    </div>
-  )
-}
-function Mono({ children }: { children: React.ReactNode }) {
-  return <span className="font-mono text-xs">{children}</span>
-}
-function Num({ children, muted }: { children: React.ReactNode; muted?: boolean }) {
-  return <td className={`px-3 py-2 text-right font-mono text-xs ${muted ? 'text-fg-muted' : ''}`}>{children}</td>
-}
-function Empty({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="rounded-sm border border-line bg-surface px-4 py-6 text-center text-sm text-fg-muted">{children}</p>
   )
 }
 
@@ -304,7 +262,8 @@ function percent(v: number | undefined): string {
 /**
  * How long a training run took. A job still in flight has no finished_at, and
  * the ticking clock belongs to the job page, so say so here rather than baking
- * a server timestamp into HTML that is stale the moment it is sent.
+ * a server timestamp into HTML that is stale the moment it is sent. A job the
+ * reaper failed has no started_at either, and reads as a dash.
  */
 function duration(job: JobTiming | undefined): string {
   if (!job?.started_at) return '-'

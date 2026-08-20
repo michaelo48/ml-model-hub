@@ -74,8 +74,9 @@ Phase 1 in progress. See [CLAUDE.md](CLAUDE.md) for the full spec and phase plan
 - [x] Per-user usage limits and rate limiting (datasets, uploads, edits, training jobs)
 - [x] Model builder (dataset, task, target, features, optimizer + hyperparameters; enqueue job)
 - [x] Worker: claim, stream CSV, train on a thread, per-epoch metrics, artifact upload, heartbeat, reaper, graceful release
-- [ ] Training page with live loss curve (Realtime subscription to `training_metrics`)
-- [ ] Inference endpoint + API keys
+- [x] Training page with live loss curve (Realtime subscription to `training_metrics`)
+- [x] Model detail page (serving version metrics, hyperparameters, artifact versions, training runs)
+- [ ] Inference endpoint + API keys. The model page badges the highest `model_artifacts.version` as "serving", per CLAUDE.md 4 ("predictions use the latest version by default"), so the predict route must load its artifact with `order('version', desc).limit(1)`. Any other choice makes that badge a lie.
 - [ ] Deployed (Vercel + Fly.io)
 
 ## Training worker

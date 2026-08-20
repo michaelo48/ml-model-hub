@@ -74,15 +74,28 @@ export function StatusBadge({ status }: { status: string }) {
 }
 
 /**
- * One labelled figure in a `<dl>` row. Monospace and tabular so a row of
- * numbers stays column-aligned as values change (training page) or differ in
- * magnitude (model metrics).
+ * One labelled value in a `<dl>` row. Monospace and tabular by default, so a
+ * row of figures stays column-aligned as values change (training page) or
+ * differ in magnitude (model metrics), and so column names and ids read as
+ * the literals they are. `prose` opts out for values that are neither: a
+ * status badge, a link, a human-readable optimizer name.
  */
-export function Stat({ label, children }: { label: string; children: ReactNode }) {
+export function Stat({ label, prose, children }: { label: string; prose?: boolean; children: ReactNode }) {
   return (
     <div>
       <dt className="text-xs text-fg-muted">{label}</dt>
-      <dd className="mt-0.5 font-mono text-sm tabular-nums">{children}</dd>
+      <dd className={prose ? 'mt-0.5' : 'mt-0.5 font-mono text-sm tabular-nums'}>{children}</dd>
     </div>
+  )
+}
+
+/**
+ * The panel shown where a table or metric block would be once there is data.
+ * Same border and surface as the table it replaces, so the page does not
+ * change shape when the first row arrives.
+ */
+export function Empty({ children }: { children: ReactNode }) {
+  return (
+    <p className="rounded-sm border border-line bg-surface px-4 py-6 text-center text-sm text-fg-muted">{children}</p>
   )
 }
