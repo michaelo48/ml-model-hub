@@ -1,3 +1,4 @@
+import { SingularMatrixError } from './errors'
 import type { Matrix, Vector } from './types'
 
 /**
@@ -20,7 +21,7 @@ export function solve(A: Matrix, b: Vector): Vector {
       if (Math.abs(M[r]![col]!) > Math.abs(M[pivot]![col]!)) pivot = r
     }
     if (Math.abs(M[pivot]![col]!) < 1e-12) {
-      throw new Error('solve: matrix is singular or ill-conditioned')
+      throw new SingularMatrixError()
     }
     if (pivot !== col) {
       const tmp = M[col]!

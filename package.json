@@ -11,9 +11,11 @@
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
-    "test": "pnpm -r test",
+    "test": "pnpm -r --workspace-concurrency=1 test",
     "db:push": "supabase db push --linked",
-    "db:migration": "supabase migration new"
+    "db:migration": "supabase migration new",
+    "db:types": "supabase gen types typescript --linked --schema public > apps/web/src/lib/supabase/database.types.ts",
+    "test:rls": "pnpm --filter @modelforge/worker test:rls"
   },
   "devDependencies": {
     "typescript": "^5"
