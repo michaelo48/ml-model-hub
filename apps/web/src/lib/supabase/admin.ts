@@ -10,9 +10,12 @@ import type { Database } from './database.types'
  * (authenticated by API key), and server code that must write rows the user
  * is not allowed to write directly. Always scope queries explicitly.
  */
-export const createAdminClient = () =>
-  createSupabaseClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SECRET_KEY!,
-    { auth: { persistSession: false, autoRefreshToken: false } }
-  )
+export const createAdminClient = () => {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const key = process.env.SUPABASE_SECRET_KEY
+  // Fail with the variable's name rather than a cryptic supabase-js error on
+  // the first request that needs it.
+  if (!url) throw new Error('NEXT_PUBLIC_SUPABASE_URL is not set')
+  if (!key) throw new Error('SUPABASE_SECRET_KEY is not set')
+  return createSupabaseClient<Database>(url, key, { auth: { persistSession: false, autoRefreshToken: false } })
+}

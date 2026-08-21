@@ -14,6 +14,10 @@ of the last run.
 
 Because the worker and inference route bypass RLS, the policies protect the
 browser path only. Server code using the secret key must scope its own queries.
+The inference route looks the key up by `key_hash` **and** `model_id` from the
+URL, and reads `model_artifacts` and writes `predictions_log` by that same
+`model_id`; API key creation and revocation go through the user session, so
+the `api_keys` policies are the authorization there.
 
 ## What the policies say
 

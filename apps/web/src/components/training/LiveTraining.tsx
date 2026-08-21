@@ -16,7 +16,7 @@ import {
   type JobRow,
   type MetricPoint,
 } from '@/lib/training/metrics'
-import { StatusBadge } from '@/components/layout/AppShell'
+import { Stat, StatusBadge } from '@/components/layout/AppShell'
 import { LossChart } from './LossChart'
 
 type MetricRow = {
@@ -351,15 +351,6 @@ function elapsed(job: JobRow, now: number | null): number | null {
   if (job.finished_at) return new Date(job.finished_at).getTime() - start
   if (now == null) return null
   return Math.max(0, now - start)
-}
-
-function Stat({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <dt className="text-xs text-fg-muted">{label}</dt>
-      <dd className="mt-0.5 font-mono text-sm tabular-nums">{children}</dd>
-    </div>
-  )
 }
 
 function Dash() {
