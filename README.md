@@ -54,6 +54,7 @@ pnpm test:integration    # worker end to end: dataset -> job -> metrics -> artif
 | web | `NEXT_PUBLIC_SUPABASE_URL` | Project URL |
 | web | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | `sb_publishable_...`, safe for the browser |
 | web | `SUPABASE_SECRET_KEY` | `sb_secret_...`, server-only (inference route) |
+| web | `NEXT_PUBLIC_APP_URL` | public origin, no trailing slash; used for the curl example on the model page (local dev falls back to the Host header) |
 | worker | `SUPABASE_URL` | Project URL |
 | worker | `SUPABASE_SECRET_KEY` | `sb_secret_...`, bypasses RLS |
 | worker | `WORKER_ID` | optional, defaults to `worker-<pid>`; shows up in `training_jobs.claimed_by` |
@@ -76,7 +77,8 @@ Phase 1 in progress. See [CLAUDE.md](CLAUDE.md) for the full spec and phase plan
 - [x] Worker: claim, stream CSV, train on a thread, per-epoch metrics, artifact upload, heartbeat, reaper, graceful release
 - [x] Training page with live loss curve (Realtime subscription to `training_metrics`)
 - [x] Model detail page (serving version metrics, hyperparameters, artifact versions, training runs)
-- [ ] Inference endpoint + API keys. The model page badges the highest `model_artifacts.version` as "serving", per CLAUDE.md 4 ("predictions use the latest version by default"), so the predict route must load its artifact with `order('version', desc).limit(1)`. Any other choice makes that badge a lie.
+- [x] Inference endpoint (`POST /api/v1/models/:id/predict`, per-model API keys, LRU artifact cache, `predictions_log`)
+- [x] API key management on the model page (generate, shown once; list by prefix; revoke)
 - [ ] Deployed (Vercel + Fly.io)
 
 ## Training worker
@@ -96,6 +98,28 @@ Ownership and failure policy:
 - SIGTERM stops training after the current epoch and releases the job back to `queued` with its attempt count restored, so a redeploy never burns a retry.
 
 Tests: `pnpm test` runs the CSV parser, dataset loader, metrics sink and training thread (against a local HTTP server and the compiled `dist/train-thread.js`) offline; `pnpm test:integration` runs the whole thing, including the orphaned-artifact, reaped-and-reclaimed and reaper scenarios, against the linked Supabase project.
+
+## Inference endpoint
+
+```
+POST /api/v1/models/<model_id>/predict
+Authorization: Bearer mf_...
+Content-Type: application/json
+```
+
+Keys are generated on the model page and belong to one model; the plaintext is shown once and only its SHA-256 digest and first eight characters are stored. The body is a JSON array of feature objects (or `{ "rows": [...] }`), at most 100 rows, with every feature column present as a finite number or boolean (extra keys are ignored):
+
+```bash
+curl -X POST https://YOUR_DEPLOYMENT/api/v1/models/MODEL_ID/predict   -H "Authorization: Bearer mf_..."   -H "Content-Type: application/json"   -d '[{"sqft": 1500, "bedrooms": 3}, {"sqft": 2200, "bedrooms": 4}]'
+```
+
+```json
+{ "model_id": "...", "version": 2, "task": "regression", "predictions": [312400.5, 455120.1] }
+```
+
+Binary classification returns `{ "probability": 0.83, "label": 1 }` per row. Errors are `{ "error": { "code", "message" } }`: `400` for a bad body (the message names the row and column), `401` for a missing, unknown, wrong-model or revoked key, `404` for a model with no trained version, `503` if the artifact cannot be loaded.
+
+The route runs with the secret key (it bypasses RLS) and scopes every query by the model id in the URL; a key never serves a model other than the one it was created for. It serves the highest `model_artifacts.version`, which is the version the model page badges as "serving". Parsed artifacts are cached per model in an in-process LRU; the cheap version lookup still runs on every request, so a retrain is served immediately and only the download is skipped. Once a key has authenticated, every outcome (including 4xx) is written to `predictions_log` after the response is sent, with latency, row count and status but no body.
 
 ## Usage limits
 

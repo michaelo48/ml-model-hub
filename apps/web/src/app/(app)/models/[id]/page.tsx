@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
+import { headers } from 'next/headers'
 import { notFound } from 'next/navigation'
 import { artifactMetricsSchema, hyperparametersSchema, OPTIMIZER_LABELS, relevantHyperparameters } from '@modelforge/ml'
 import { createClient } from '@/lib/supabase/server'
@@ -9,6 +10,8 @@ import { formatUtc } from '@/lib/time'
 import { Empty, PageHeader, Stat, StatusBadge } from '@/components/layout/AppShell'
 import { Num, Th } from '@/components/ui/table'
 import { ModelActions } from '@/components/models/ModelActions'
+import { ApiKeys } from '@/components/models/ApiKeys'
+import { columnsSchema } from '@/lib/csv/infer'
 
 export const metadata: Metadata = { title: 'Model' }
 
@@ -26,12 +29,12 @@ export default async function ModelPage({ params }: PageProps<'/models/[id]'>) {
   const supabase = await createClient()
   const { data: model } = await supabase
     .from('models')
-    .select('*, datasets(id, name, row_count)')
+    .select('*, datasets(id, name, row_count, columns)')
     .eq('id', id)
     .maybeSingle()
   if (!model) notFound()
 
-  const [{ data: jobs }, { data: artifacts }] = await Promise.all([
+  const [{ data: jobs }, { data: artifacts }, { data: apiKeys }, hdrs] = await Promise.all([
     supabase
       .from('training_jobs')
       .select('id, status, created_at, started_at, finished_at, error_message, attempt')
@@ -42,6 +45,12 @@ export default async function ModelPage({ params }: PageProps<'/models/[id]'>) {
       .select('id, job_id, version, metrics, created_at')
       .eq('model_id', id)
       .order('version', { ascending: false }),
+    supabase
+      .from('api_keys')
+      .select('id, name, key_prefix, created_at, last_used_at, revoked_at')
+      .eq('model_id', id)
+      .order('created_at', { ascending: false }),
+    headers(),
   ])
 
   const hp = hyperparametersSchema.safeParse(model.hyperparameters)
@@ -57,6 +66,12 @@ export default async function ModelPage({ params }: PageProps<'/models/[id]'>) {
   // predict route must pick its artifact the same way or the badge below lies.
   const serving = artifacts?.[0]
   const servingMetrics = serving ? artifactMetricsSchema.safeParse(serving.metrics) : null
+
+  // The curl example in the keys panel should be runnable as pasted, so build
+  // the absolute endpoint URL and a body from the dataset's own sample values,
+  // in the model's feature order.
+  const endpoint = `${appOrigin(hdrs)}/api/v1/models/${model.id}/predict`
+  const exampleBody = JSON.stringify([exampleRow(model.feature_columns, model.datasets?.columns)])
 
   return (
     <>
@@ -210,7 +225,7 @@ export default async function ModelPage({ params }: PageProps<'/models/[id]'>) {
         )}
       </section>
 
-      <section>
+      <section className="mb-8">
         <h2 className="mb-2 text-sm font-medium">Training jobs</h2>
         {!jobs || jobs.length === 0 ? (
           <Empty>No training runs yet. Press Train to enqueue one.</Empty>
@@ -247,8 +262,49 @@ export default async function ModelPage({ params }: PageProps<'/models/[id]'>) {
           </div>
         )}
       </section>
+
+      <section>
+        <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+          <h2 className="text-sm font-medium">API keys</h2>
+          <code className="font-mono text-xs text-fg-muted">POST {endpoint}</code>
+        </div>
+        {!serving ? (
+          <p className="mb-3 text-xs text-fg-muted">
+            Keys can be created now; requests return 404 until a version has been trained.
+          </p>
+        ) : null}
+        <ApiKeys modelId={model.id} keys={apiKeys ?? []} endpoint={endpoint} exampleBody={exampleBody} />
+      </section>
     </>
   )
+}
+
+/**
+ * Public origin of this deployment. NEXT_PUBLIC_APP_URL is the source of
+ * truth; the request's Host header is only a convenience for local dev, where
+ * the port varies, never something to build a URL from in production.
+ */
+function appOrigin(hdrs: Headers): string {
+  const configured = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/+$/, '')
+  if (configured) return configured
+  return `http://${hdrs.get('host') ?? 'localhost:3000'}`
+}
+
+/**
+ * One plausible request row for the curl example: the first sample value of
+ * each feature column from the dataset's metadata, as a number (booleans as
+ * 0/1), falling back to 0 when the metadata has nothing usable.
+ */
+function exampleRow(features: string[], columnsJson: unknown): Record<string, number> {
+  const cols = columnsSchema.safeParse(columnsJson)
+  const byName = new Map(cols.success ? cols.data.map((c) => [c.name, c]) : [])
+  const row: Record<string, number> = {}
+  for (const f of features) {
+    const sample = byName.get(f)?.sample[0]?.trim().toLowerCase()
+    const n = sample === undefined ? NaN : ['true', 'yes', 't', 'y'].includes(sample) ? 1 : ['false', 'no', 'f', 'n'].includes(sample) ? 0 : Number(sample)
+    row[f] = Number.isFinite(n) ? n : 0
+  }
+  return row
 }
 
 /** A metric the worker records for one task only; absent is a dash, not a zero. */
