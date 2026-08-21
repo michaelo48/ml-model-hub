@@ -6,6 +6,7 @@ import { isMissing } from '@/lib/csv/infer'
 import type { ColumnType } from '@/lib/csv/infer'
 import { applyMissingFixesAction, restoreOriginalDataset } from '@/lib/datasets/missing-actions'
 import type { FillStrategy, MissingReport } from '@/lib/datasets/missing'
+import { Empty } from '@/components/layout/AppShell'
 import { FormMessage, SubmitButton } from '@/components/ui/form'
 
 type ColumnFill = { strategy: FillStrategy | 'none' | 'drop'; value: string }
@@ -97,9 +98,7 @@ export function MissingEditor({
   if (report.totalMissingRows === 0) {
     return (
       <div className="flex flex-col gap-4">
-        <p className="rounded-sm border border-line bg-surface px-4 py-6 text-center text-sm text-fg-muted">
-          No missing values. This dataset is ready to train on.
-        </p>
+        <Empty>No missing values. This dataset is ready to train on.</Empty>
         {hasOriginal ? <RestoreRow onRestore={restore} pending={pending} /> : null}
         {message ? <FormMessage tone={message.tone}>{message.text}</FormMessage> : null}
       </div>
