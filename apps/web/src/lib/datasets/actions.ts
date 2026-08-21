@@ -8,6 +8,7 @@ import type { Json } from '@/lib/supabase/database.types'
 import { DATASET_LIMITS, DATASETS_BUCKET, analyzeCsv, type ColumnMeta } from '@/lib/csv/infer'
 import { parseCsvText } from '@/lib/csv/parse'
 import { dbErrorMessage } from '@/lib/limits'
+import { originalDatasetPath } from './paths'
 
 const BUCKET = DATASETS_BUCKET
 
@@ -43,7 +44,7 @@ export async function createDataset(input: {
   // The database trigger is the gate for the per-user cap and the hourly upload
   // rate; both reject with SQLSTATE 54000 and a message meant for the user.
   const id = crypto.randomUUID()
-  const storagePath = `${user.id}/${id}.csv`
+  const storagePath = originalDatasetPath(user.id, id)
 
   const { error } = await supabase.from('datasets').insert({
     id,
@@ -143,10 +144,11 @@ export async function deleteDataset(datasetId: string): Promise<ActionResult<und
     }
     return { ok: false, error: error.message }
   }
-  // Best effort: the row is gone either way; an orphaned object is harmless.
+  // Best effort: the row is gone either way; an orphaned object is unreadable
+  // and the worker's periodic sweep (apps/worker/src/sweep.ts) removes it later.
   // Remove the current version and the original upload (they differ once the
   // missing-values editor has written a <id>.v<n>.csv version).
-  const original = `${user.id}/${datasetId}.csv`
+  const original = originalDatasetPath(user.id, datasetId)
   await supabase.storage
     .from(BUCKET)
     .remove(ds.storage_path === original ? [original] : [ds.storage_path, original])

@@ -38,6 +38,10 @@ const schema = z
     DATASET_URL_TTL_SECONDS: z.coerce.number().int().positive().default(600),
     /** Abort deadline for every Supabase request (DB and storage). */
     REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
+    /** How often to sweep the storage buckets for objects no row points at. 0 disables. */
+    SWEEP_INTERVAL_MS: z.coerce.number().int().nonnegative().default(6 * 3_600_000),
+    /** An unreferenced object younger than this is left alone: its row may still be on the way. */
+    SWEEP_GRACE_MS: z.coerce.number().int().positive().default(3_600_000),
   })
   .superRefine((env, ctx) => {
     // A worker must be able to miss a couple of heartbeats (GC pause, slow

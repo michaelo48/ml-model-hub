@@ -15,22 +15,7 @@ import {
   type MissingFixes,
   type MissingReport,
 } from './missing'
-
-/**
- * Storage layout: the untouched upload lives at <uid>/<id>.csv and is never
- * overwritten. Each edit writes a new immutable object <uid>/<id>.v<n>.csv and
- * repoints datasets.storage_path at it. Immutable keys sidestep CDN caching of
- * in-place overwrites; restore is just pointing back at the original.
- */
-function originalPath(userId: string, datasetId: string): string {
-  return `${userId}/${datasetId}.csv`
-}
-
-function nextVersionPath(userId: string, datasetId: string, current: string): string {
-  const m = /\.v(\d+)\.csv$/.exec(current)
-  const n = m ? Number(m[1]) + 1 : 1
-  return `${userId}/${datasetId}.v${n}.csv`
-}
+import { originalDatasetPath as originalPath, nextVersionPath } from './paths'
 
 type Supabase = Awaited<ReturnType<typeof createClient>>
 type OwnedDataset = { id: string; storage_path: string; status: string; row_count: number | null; columns: Json | null }

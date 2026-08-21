@@ -17,7 +17,9 @@ browser path only. Server code using the secret key must scope its own queries.
 The inference route looks the key up by `key_hash` **and** `model_id` from the
 URL, and reads `model_artifacts` and writes `predictions_log` by that same
 `model_id`; API key creation and revocation go through the user session, so
-the `api_keys` policies are the authorization there.
+the `api_keys` policies are the authorization there. `deleteModel` runs
+entirely under the user session: the `models` bucket grants owners delete on
+their own folder for exactly this cleanup.
 
 ## What the policies say
 
@@ -39,7 +41,7 @@ Storage:
 | Bucket | user select | user insert/update/delete |
 | --- | --- | --- |
 | `datasets` | own folder (`<user_id>/...`) | own folder, and only the next expected object of one of the user's `datasets` rows: `<user_id>/<dataset_id>.csv` while `status = 'uploading'`, or `<user_id>/<dataset_id>.v<k+1>.csv` while `ready` where `k` is the version currently in `storage_path` |
-| `models` | own folder | no (worker writes) |
+| `models` | own folder | insert/update no (worker writes); delete own folder (`deleteModel` artifact cleanup) |
 
 Worker-only functions: `claim_training_job(text)`, `reap_stale_jobs(interval, int)`,
 `assert_rate_limit(uuid, text, text, interval, text)`. `EXECUTE` is revoked from

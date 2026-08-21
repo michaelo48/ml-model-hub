@@ -2,12 +2,14 @@ import { claimJob, createDb, probe, reapStaleJobs } from './db'
 import { loadEnv } from './env'
 import { runJob, type RunningJob } from './job'
 import { log } from './log'
+import { createSweepDeps, sweepOrphans } from './sweep'
 
 /**
  * Worker entry point. Owns process lifecycle only.
  *
- * Loop: reap stale jobs now and then, try to claim a queued job, run it to
- * completion (job.ts), repeat. One job at a time per process: training is
+ * Loop: reap stale jobs now and then, sweep orphaned storage objects much less
+ * often (sweep.ts), try to claim a queued job, run it to completion (job.ts),
+ * repeat. One job at a time per process: training is
  * CPU-bound and runs on a dedicated thread, so a second concurrent job would
  * only compete for the same core. Scale by running more instances; the claim
  * is atomic so they never collide.
@@ -53,6 +55,31 @@ async function main(): Promise<void> {
     return
   }
 
+  // The sweep walks both buckets folder by folder (one list() call per user
+  // and per model, serially), which at a few hundred users takes minutes. It
+  // runs off the claim path as a background promise so queued jobs are never
+  // waiting on housekeeping, with a guard so a slow sweep is not stacked on
+  // itself. Idempotent, so several instances sweeping independently is merely
+  // redundant, but redundant walks are not free: the first sweep is scheduled
+  // a full (jittered) interval after boot rather than at boot, so a fleet
+  // deploy or a crash loop does not turn into a bucket walk per process.
+  const sweepDeps = createSweepDeps(db)
+  let sweepInFlight: Promise<void> | null = null
+  let nextSweepAt = Date.now() + jittered(env.SWEEP_INTERVAL_MS)
+  const startSweep = (now: number): void => {
+    nextSweepAt = now + jittered(env.SWEEP_INTERVAL_MS)
+    sweepInFlight = sweepOrphans(sweepDeps, now, env.SWEEP_GRACE_MS)
+      .then((r) => {
+        log.info('storage sweep finished', { datasets: r.datasets, models: r.models, elapsedMs: Date.now() - now })
+      })
+      .catch((err: unknown) => {
+        log.warn('storage sweep failed', { error: err instanceof Error ? err.message : String(err) })
+      })
+      .finally(() => {
+        sweepInFlight = null
+      })
+  }
+
   let lastReap = 0
   while (!stopping) {
     const now = Date.now()
@@ -65,6 +92,8 @@ async function main(): Promise<void> {
         log.warn('reaper failed', { error: err instanceof Error ? err.message : String(err) })
       }
     }
+
+    if (env.SWEEP_INTERVAL_MS > 0 && now >= nextSweepAt && sweepInFlight === null) startSweep(now)
 
     let claimed = null
     try {
@@ -88,7 +117,15 @@ async function main(): Promise<void> {
     wake = null
   }
 
+  // Let an in-flight sweep finish its current batch; it is bounded by the
+  // same shutdown grace timer as the job.
+  if (sweepInFlight) await sweepInFlight
   log.info('worker stopped', { workerId: env.WORKER_ID })
+}
+
+/** `ms` stretched by up to 10%, so instances that booted together drift apart. */
+function jittered(ms: number): number {
+  return ms + Math.floor(Math.random() * ms * 0.1)
 }
 
 /** Sleep that can be cut short by calling the function handed to `onWake`. */

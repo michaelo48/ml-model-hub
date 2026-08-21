@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { modelDefinitionSchema, type ModelDefinition } from '@modelforge/ml'
 import { createClient } from '@/lib/supabase/server'
+import { MODELS_BUCKET } from '@/lib/inference/artifacts'
 import type { ActionResult } from '@/lib/result'
 import type { Json } from '@/lib/supabase/database.types'
 import { columnsSchema } from '@/lib/csv/infer'
@@ -141,8 +142,29 @@ export async function deleteModel(modelId: string): Promise<ActionResult<undefin
     return { ok: false, error: 'Wait for the current training job to finish before deleting.' }
   }
 
+  // Collect artifact paths before the row goes: the cascade removes the
+  // model_artifacts rows and with them the only record of where the JSON lives.
+  const { data: artifacts, error: artErr } = await supabase
+    .from('model_artifacts')
+    .select('storage_path')
+    .eq('model_id', modelId)
+  // Not fatal (the sweep catches what we miss), but it must not be silent:
+  // a failure here is the only way to know the sweep is carrying real load.
+  if (artErr) console.error('[deleteModel] could not list artifacts for cleanup', { modelId, message: artErr.message })
+
   const { error } = await supabase.from('models').delete().eq('id', modelId)
   if (error) return { ok: false, error: error.message }
+
+  // Best effort, like deleteDataset: the row is gone either way, an orphaned
+  // artifact is unreadable (no row points at it), and the worker's periodic
+  // sweep (apps/worker/src/sweep.ts) removes it later. This runs under the
+  // user session: the 'models' bucket has an owner-delete policy scoped to
+  // the user's folder, so no secret key is involved on this path.
+  const paths = (artifacts ?? []).map((a) => a.storage_path)
+  if (paths.length > 0) {
+    const { error: rmErr } = await supabase.storage.from(MODELS_BUCKET).remove(paths)
+    if (rmErr) console.error('[deleteModel] artifact cleanup failed', { modelId, paths, message: rmErr.message })
+  }
 
   revalidatePath('/dashboard')
   return { ok: true, data: undefined }

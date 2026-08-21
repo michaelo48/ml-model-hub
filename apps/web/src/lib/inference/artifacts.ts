@@ -4,7 +4,7 @@ import { parseArtifact, type Artifact } from '@modelforge/ml'
 import type { Database } from '@/lib/supabase/database.types'
 import { LruCache } from './cache'
 
-const MODELS_BUCKET = 'models'
+export const MODELS_BUCKET = 'models'
 
 export interface ServingArtifact {
   version: number
